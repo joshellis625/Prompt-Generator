@@ -144,16 +144,60 @@ class PromptGenerator:
         text = re.sub(r'\s+(BREAK_CLIP[GL])', r' \1', text)
          # Remove spaces after BREAK markers
         text = re.sub(r'(BREAK_CLIP[GL])\s+', r'\1 ', text)
+        # Remove spaces before periods
+        text = re.sub(r'\s+\.', '.', text)
+        # Ensure space after period before word (but not multiple spaces)
+        text = re.sub(r'\.([A-Z])', r'. \1', text)
+        # Fix double periods
+        text = re.sub(r'\.\.+', '.', text)
         # Replace multiple spaces with a single space
         text = re.sub(r'\s+', ' ', text).strip()
         # Specific cleanup like 'of a as' -> 'of a' etc.
-        text = text.replace(" of as ", " of ") # Check variations if needed
-        text = text.replace(" a as ", " as ") # Example
+        text = text.replace(" of as ", " of ")
+        text = text.replace(" a as ", " as ")
+        text = text.replace(" as as ", " as ")  # Fix "working as as a"
+        text = text.replace(" with with ", " with ")  # Fix "with with"
         # Remove empty segments like ", ," or leading ", " after splits
         text = re.sub(r'^,\s*', '', text)
         text = re.sub(r'\s*,\s*$', '', text)
         text = re.sub(r',(\s*,)+', ',', text)
         return text
+
+    def strip_weights_for_natural_language(self, text):
+        """Removes parentheses and weights from text for natural language (T5-XXL)."""
+        if not text: return ""
+        # Remove weights like (text:1.5) -> text
+        text = re.sub(r'\(([^:)]+):[0-9.]+\)', r'\1', text)
+        # Remove simple parentheses (text) -> text
+        text = re.sub(r'\(([^)]+)\)', r'\1', text)
+        return text
+
+    def _build_natural_language_sentence(self, category, value, context=None):
+        """Converts a category value into a natural language fragment."""
+        if not value:
+            return ""
+
+        templates = {
+            'role': f"working as {value}",
+            'hairstyle': f"with {value}",
+            'clothing': f"dressed in {value}",
+            'composition': f"The composition follows {value}",
+            'pose': f"The subject is {value}",
+            'face_features': f"with {value}",
+            'eye_color': f"with {value} eyes",
+            'skin_tone': f"with {value} skin",
+            'age_group': f"appearing {value}",
+            'ethnicity': f"of {value} descent",
+            'accessories': f"wearing {value}",
+            'expression': f"with a {value} expression",
+            'tattoos_scars': f"featuring {value}",
+            'hair_color': f"with {value} hair",
+            'body_markings': f"displaying {value}",
+            'facial_hair': f"with {value}",
+            'makeup': f"styled with {value} makeup"
+        }
+
+        return templates.get(category, value)
 
     def _format_debug_info(self, debug_info):
         """Format debug info as readable string"""
@@ -197,6 +241,10 @@ class PromptGenerator:
         # Original prompt is T5 content with markers removed
         original_content = t5xxl_content.replace('BREAK_CLIPL', '').replace('BREAK_CLIPG', '')
 
+        # Strip weights/parentheses from T5-XXL content (natural language doesn't need weights)
+        original_content = self.strip_weights_for_natural_language(original_content)
+        t5xxl_content = self.strip_weights_for_natural_language(t5xxl_content)
+
         # Clean all parts
         original_clean = self.clean_prompt_string(original_content)
         t5xxl_clean = self.clean_prompt_string(t5xxl_content)
@@ -223,28 +271,46 @@ class PromptGenerator:
         if custom:
             components.append(custom)
 
-        # --- 2. Artform / Style Lead-in ---
+        # --- 2. Artform / Style Lead-in (with photo_type integrated) ---
         artform = self._get_choice(kwargs.get("artform", "disabled"), ARTFORM)
         is_photographer = (artform.lower() == "photography")
 
+        # Get photo_type early to integrate into opening
+        photo_type = self._get_choice(kwargs.get("photo_type", "random"), PHOTO_TYPE)
+
         if is_photographer:
             photo_style = self._get_choice(kwargs.get("photography_styles", "random"), PHOTOGRAPHY_STYLES)
-            if photo_style:
-                components.append(photo_style)
-            else:
-                 # Fallback if random selects nothing or style is disabled
-                 components.append("photography") # Default base style
+            # Build opening with optional photo_type
+            opening_parts = []
+            if photo_type:
+                opening_parts.append(f"A {photo_type}")
+            opening_parts.append(photo_style if photo_style else "photography")
+            components.append(" ".join(opening_parts))
+
             # Add "of" if a subject or default tag will follow
             if kwargs.get("subject") or kwargs.get("default_tags", "disabled").lower() != "disabled":
                  components.append("of") # Add connector word
 
         elif artform and artform.lower() != "disabled":
-             components.append(artform)
+             # Build opening with optional photo_type
+             opening_parts = []
+             if photo_type:
+                 opening_parts.append(f"A {photo_type}")
+             opening_parts.append(artform)
+             components.append(" ".join(opening_parts))
+
              # Add "of" if a subject or default tag will follow and artform isn't inherently descriptive like 'illustration'
              if kwargs.get("subject") or kwargs.get("default_tags", "disabled").lower() != "disabled":
                  # Could refine this list if needed
                  if artform.lower() not in ["illustration", "painting", "drawing", "sketch"]:
                      components.append("of")
+
+        elif photo_type:
+            # Standalone photo_type when artform is disabled
+            components.append(f"A {photo_type}")
+            # Add "of" if a subject or default tag will follow
+            if kwargs.get("subject") or kwargs.get("default_tags", "disabled").lower() != "disabled":
+                components.append("of")
 
         # --- 3. Subject Definition ---
         subject = kwargs.get("subject", "")
@@ -252,7 +318,8 @@ class PromptGenerator:
         body_type_input = kwargs.get("body_types", "random")
 
         chosen_subject_elements = []
-        if subject: # User provided subject takes precedence
+        # User provided subject takes precedence (but not if it's "random" or "disabled")
+        if subject and subject.lower() not in ["random", "disabled"]:
             chosen_body_type = self._get_choice(body_type_input, BODY_TYPES)
             if chosen_body_type:
                  chosen_subject_elements.extend(["a", chosen_body_type]) # e.g., "a muscular"
@@ -282,24 +349,41 @@ class PromptGenerator:
         resolved_subject_desc = " ".join(chosen_subject_elements).lower()
 
         # --- 4. Core Details (Roles, Hairstyles, Additional Details) ---
-        core_details = [
-            self._get_choice(kwargs.get("roles", "random"), ROLES),
-            self._get_choice(kwargs.get("hairstyles", "random"), HAIRSTYLES),
-            self._get_choice(kwargs.get("additional_details", "random"), ADDITIONAL_DETAILS),
-        ]
-        components.append(smart_join(core_details))
+        # Build natural language sentences instead of comma-joining
+        role = self._get_choice(kwargs.get("roles", "random"), ROLES)
+        hairstyle = self._get_choice(kwargs.get("hairstyles", "random"), HAIRSTYLES)
+        additional_details = self._get_choice(kwargs.get("additional_details", "random"), ADDITIONAL_DETAILS)
+
+        core_parts = []
+        if role:
+            core_parts.append(self._build_natural_language_sentence('role', role))
+        if hairstyle:
+            core_parts.append(self._build_natural_language_sentence('hairstyle', hairstyle))
+
+        if core_parts:
+            components.append(" ".join(core_parts))
+
+        if additional_details:
+            components.append(f". {additional_details}")
 
         # --- 5. Clothing ---
         clothing = self._get_choice(kwargs.get("clothing", "random"), CLOTHING)
         if clothing:
-            components.append(f"dressed in {clothing}")
+            components.append(f". Dressed in {clothing}")
 
         # --- 6. Composition & Pose ---
-        comp_pose = [
-            self._get_choice(kwargs.get("composition", "random"), COMPOSITION),
-            self._get_choice(kwargs.get("pose", "random"), POSE),
-        ]
-        components.append(smart_join(comp_pose))
+        # Build natural language sentences with periods
+        composition = self._get_choice(kwargs.get("composition", "random"), COMPOSITION)
+        pose = self._get_choice(kwargs.get("pose", "random"), POSE)
+
+        comp_pose_parts = []
+        if pose:
+            comp_pose_parts.append(f"The subject is {pose}")
+        if composition:
+            comp_pose_parts.append(f"The composition follows {composition}")
+
+        if comp_pose_parts:
+            components.append(". " + ". ".join(comp_pose_parts))
 
         # --- BREAK CLIP G 1 ---
         components.append("BREAK_CLIPG")
@@ -328,48 +412,107 @@ class PromptGenerator:
         components.append("BREAK_CLIPG")
 
         # --- 9. Physical Features ---
-        features = [
-            self._get_choice(kwargs.get("face_features", "random"), FACE_FEATURES),
-            self._get_choice(kwargs.get("eye_colors", "random"), EYE_COLORS),
-            self._get_choice(kwargs.get("skin_tone", "random"), SKIN_TONE),
-            self._get_choice(kwargs.get("age_group", "random"), AGE_GROUP),
-            self._get_choice(kwargs.get("ethnicity", "random"), ETHNICITY),
-            self._get_choice(kwargs.get("accessories", "random"), ACCESSORIES),
-            self._get_choice(kwargs.get("expression", "random"), EXPRESSION),
-            self._get_choice(kwargs.get("tattoos_scars", "random"), TATTOOS_SCARS),
-            self._get_choice(kwargs.get("hair_color", "random"), HAIR_COLOR),
-            self._get_choice(kwargs.get("body_markings", "random"), BODY_MARKINGS),
-            self._get_choice(kwargs.get("facial_hair", "random"), FACIAL_HAIR),
-            self._get_choice(kwargs.get("makeup_styles", "random"), MAKEUP_STYLES),
-        ]
+        # Get all feature values
+        face_features = self._get_choice(kwargs.get("face_features", "random"), FACE_FEATURES)
+        eye_color = self._get_choice(kwargs.get("eye_colors", "random"), EYE_COLORS)
+        skin_tone = self._get_choice(kwargs.get("skin_tone", "random"), SKIN_TONE)
+        age_group = self._get_choice(kwargs.get("age_group", "random"), AGE_GROUP)
+        ethnicity = self._get_choice(kwargs.get("ethnicity", "random"), ETHNICITY)
+        accessories = self._get_choice(kwargs.get("accessories", "random"), ACCESSORIES)
+        expression = self._get_choice(kwargs.get("expression", "random"), EXPRESSION)
+        tattoos_scars = self._get_choice(kwargs.get("tattoos_scars", "random"), TATTOOS_SCARS)
+        hair_color = self._get_choice(kwargs.get("hair_color", "random"), HAIR_COLOR)
+        body_markings = self._get_choice(kwargs.get("body_markings", "random"), BODY_MARKINGS)
 
-        components.append(smart_join(features))
+        # Facial hair and makeup - now independent of gender for modern/creative contexts
+        facial_hair = self._get_choice(kwargs.get("facial_hair", "random"), FACIAL_HAIR)
+        makeup = self._get_choice(kwargs.get("makeup_styles", "random"), MAKEUP_STYLES)
 
+        # Group features into coherent sentences
+        feature_sentences = []
+
+        # Sentence 1: Face, eyes, expression
+        face_parts = []
+        if face_features:
+            face_parts.append(face_features)
+        if eye_color:
+            face_parts.append(f"{eye_color} eyes")
+        if expression:
+            face_parts.append(f"a {expression} expression")
+        if face_parts:
+            feature_sentences.append("They have " + " and ".join(face_parts))
+
+        # Sentence 2: Skin, age, ethnicity
+        identity_parts = []
+        if skin_tone:
+            identity_parts.append(f"{skin_tone} skin")
+        if age_group:
+            # Age groups that are nouns need articles
+            age_nouns = ["adult", "child", "infant", "preteen", "senior", "teenager", "toddler", "young adult"]
+            if age_group in age_nouns:
+                article = "an" if age_group[0].lower() in "aeiou" else "a"
+                identity_parts.append(f"appearing as {article} {age_group}")
+            else:
+                # Adjectives don't need articles
+                identity_parts.append(f"appearing {age_group}")
+        if ethnicity:
+            identity_parts.append(f"of {ethnicity} descent")
+        if identity_parts:
+            feature_sentences.append("The subject has " + ", ".join(identity_parts))
+
+        # Sentence 3: Hair, accessories, markings, gender-specific (only one of facial_hair OR makeup)
+        detail_parts = []
+        if hair_color:
+            detail_parts.append(f"{hair_color} hair")
+        if accessories:
+            detail_parts.append(f"wearing {accessories}")
+        if tattoos_scars:
+            detail_parts.append(f"featuring {tattoos_scars}")
+        if body_markings:
+            detail_parts.append(f"displaying {body_markings}")
+        if facial_hair and not makeup:  # Only add if makeup isn't present
+            detail_parts.append(f"{facial_hair}")
+        elif makeup:  # Only add if facial_hair isn't present
+            detail_parts.append(f"{makeup}")
+        if detail_parts:
+            feature_sentences.append("Notable features include " + ", ".join(detail_parts))
+
+        if feature_sentences:
+            components.append(". " + ". ".join(feature_sentences))
+
+        # --- 10. Camera/Device (for T5-XXL natural language) ---
+        device = self._get_choice(kwargs.get("device", "random"), DEVICE)
+        if device:
+            components.append(f". The image was captured using a {device}")
 
         # --- BREAK CLIP L 1 ---
         components.append("BREAK_CLIPL")
 
-        # --- 10. Technical/Artistic Details ---
+        # --- 11. Technical/Artistic Details (for CLIP_L keywords) ---
         # All categories now work independently - users control via their selections
         tech_artist_details = []
 
-        photo_type = self._get_choice(kwargs.get("photo_type", "random"), PHOTO_TYPE)
+        # Framing (weighted) - reuse the same value fetched for T5-XXL opening
+        # This ensures consistency between T5-XXL and CLIP_L
         if photo_type:
             random_value = round(self.rng.uniform(1.1, 1.5), 1)
             tech_artist_details.append(f"({photo_type}:{random_value})")
 
-        device = self._get_choice(kwargs.get("device", "random"), DEVICE)
+        # Device - already fetched above for T5-XXL, reuse the same value
         if device:
             tech_artist_details.append(f"shot on {device}")
 
+        # Digital artform - works independently
         digital_artform = self._get_choice(kwargs.get("digital_artform", "random"), DIGITAL_ARTFORM)
         if digital_artform:
             tech_artist_details.append(digital_artform)
 
+        # Photographer - works independently
         photographer = self._get_choice(kwargs.get("photographer", "random"), PHOTOGRAPHER)
         if photographer:
             tech_artist_details.append(f"photo by {photographer}")
 
+        # Artist - works independently
         artist = self._get_choice(kwargs.get("artist", "random"), ARTIST)
         if artist:
             tech_artist_details.append(f"by {artist}")
@@ -415,6 +558,13 @@ class PromptGenerator:
             if 'default_tags' in debug_info['used']:
                 debug_info['not_used']['default_tags'] = "ignored (subject takes precedence)"
                 del debug_info['used']['default_tags']
+
+        # photography_styles only used when artform is photography
+        if kwargs.get('photography_styles', '') and kwargs.get('photography_styles', '').lower() not in ['disabled', '']:
+            if artform.lower() != "photography":
+                if 'photography_styles' in debug_info['used']:
+                    debug_info['not_used']['photography_styles'] = f"ignored (artform={artform}, not photography)"
+                    del debug_info['used']['photography_styles']
 
         # Format debug output as readable string
         debug_output = self._format_debug_info(debug_info)
@@ -467,7 +617,7 @@ class FluxPromptGenerator:
 
     # Correct RETURN_TYPES and add RETURN_NAMES
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
-    RETURN_NAMES = ("prompt", "t5xxl", "clip_l", "clip_g", "seed_used", "debug_info")
+    RETURN_NAMES = ("prompt", "t5xxl", "clip_l", "clip_g", "seed", "debug_info")
 
     FUNCTION = "execute"
     CATEGORY = "Prompt"
@@ -477,7 +627,7 @@ class FluxPromptGenerator:
         seed = kwargs.get('seed', 0) # Extract seed separately if needed elsewhere
         prompt_generator = PromptGenerator(seed)
         prompt = prompt_generator.generate_prompt(**kwargs)
-        # Unpack the 6-tuple and return all outputs including debug_info
+        # Unpack the 6-tuple and return all 6 outputs including seed_used
         original_clean, seed_used, t5xxl_clean, clip_l_clean, clip_g_clean, debug_output = prompt
         # Concatenate all sections into a single combined prompt
         combined_prompt = ", ".join(filter(None, [t5xxl_clean, clip_l_clean, clip_g_clean]))
