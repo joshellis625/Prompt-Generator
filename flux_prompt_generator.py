@@ -155,7 +155,26 @@ class PromptGenerator:
         text = re.sub(r',(\s*,)+', ',', text)
         return text
 
-    def process_string_v2(self, combined_prompt, seed):
+    def _format_debug_info(self, debug_info):
+        """Format debug info as readable string"""
+        lines = []
+        lines.append("=== DEBUG INFO - CATEGORY USAGE ===\n")
+
+        # Categories Used
+        lines.append(f"✅ CATEGORIES USED ({len(debug_info['used'])})")
+        for category, value in sorted(debug_info['used'].items()):
+            # Truncate long values
+            display_value = str(value)[:60] + "..." if len(str(value)) > 60 else str(value)
+            lines.append(f"  • {category:20s} = {display_value}")
+
+        # Categories Not Used
+        lines.append(f"\n❌ CATEGORIES NOT USED ({len(debug_info['not_used'])})")
+        for category, reason in sorted(debug_info['not_used'].items()):
+            lines.append(f"  • {category:20s} : {reason}")
+
+        return "\n".join(lines)
+
+    def process_string_v2(self, combined_prompt, seed, debug_output=""):
         """Uses regex to split the prompt based on BREAK markers."""
         clip_l_content = ""
         clip_g_content = ""
@@ -184,13 +203,20 @@ class PromptGenerator:
         clip_l_clean = self.clean_prompt_string(clip_l_content)
         clip_g_clean = self.clean_prompt_string(clip_g_content)
 
-        return original_clean, seed, t5xxl_clean, clip_l_clean, clip_g_clean
+        return original_clean, seed, t5xxl_clean, clip_l_clean, clip_g_clean, debug_output
 
     def generate_prompt(self, seed, **kwargs):
         # Use kwargs directly, simplifies passing arguments
         self.rng = random.Random(seed) # Re-seed for each generation if seed changes
 
         components = []
+
+        # Debug tracking: Track which categories are used vs not used
+        debug_info = {
+            'used': {},      # Categories that had values and were used
+            'not_used': {},  # Categories that were disabled/empty/ignored
+            'all_inputs': {} # All input values for reference
+        }
 
         # --- 1. Custom Prompt ---
         custom = kwargs.get("custom", "")
@@ -313,12 +339,9 @@ class PromptGenerator:
             self._get_choice(kwargs.get("tattoos_scars", "random"), TATTOOS_SCARS),
             self._get_choice(kwargs.get("hair_color", "random"), HAIR_COLOR),
             self._get_choice(kwargs.get("body_markings", "random"), BODY_MARKINGS),
+            self._get_choice(kwargs.get("facial_hair", "random"), FACIAL_HAIR),
+            self._get_choice(kwargs.get("makeup_styles", "random"), MAKEUP_STYLES),
         ]
-         # Conditional additions based on resolved subject/tag
-        if "man" in resolved_subject_desc or "male" in resolved_subject_desc:
-            features.append(self._get_choice(kwargs.get("facial_hair", "random"), FACIAL_HAIR))
-        if "woman" in resolved_subject_desc or "female" in resolved_subject_desc:
-             features.append(self._get_choice(kwargs.get("makeup_styles", "random"), MAKEUP_STYLES))
 
         components.append(smart_join(features))
 
@@ -327,30 +350,29 @@ class PromptGenerator:
         components.append("BREAK_CLIPL")
 
         # --- 10. Technical/Artistic Details ---
+        # All categories now work independently - users control via their selections
         tech_artist_details = []
-        if is_photographer:
-            photo_type = self._get_choice(kwargs.get("photo_type", "random"), PHOTO_TYPE)
-            if photo_type:
-                # Apply random weight only if a specific photo type is chosen or randomly selected
-                random_value = round(self.rng.uniform(1.1, 1.5), 1)
-                tech_artist_details.append(f"({photo_type}:{random_value})")
 
-            device = self._get_choice(kwargs.get("device", "random"), DEVICE)
-            if device:
-                tech_artist_details.append(f"shot on {device}")
+        photo_type = self._get_choice(kwargs.get("photo_type", "random"), PHOTO_TYPE)
+        if photo_type:
+            random_value = round(self.rng.uniform(1.1, 1.5), 1)
+            tech_artist_details.append(f"({photo_type}:{random_value})")
 
-            photographer = self._get_choice(kwargs.get("photographer", "random"), PHOTOGRAPHER)
-            if photographer:
-                tech_artist_details.append(f"photo by {photographer}")
-        else:
-            # Non-photographer artform
-            digital_artform = self._get_choice(kwargs.get("digital_artform", "random"), DIGITAL_ARTFORM)
-            if digital_artform:
-                 tech_artist_details.append(digital_artform)
+        device = self._get_choice(kwargs.get("device", "random"), DEVICE)
+        if device:
+            tech_artist_details.append(f"shot on {device}")
 
-            artist = self._get_choice(kwargs.get("artist", "random"), ARTIST)
-            if artist:
-                tech_artist_details.append(f"by {artist}")
+        digital_artform = self._get_choice(kwargs.get("digital_artform", "random"), DIGITAL_ARTFORM)
+        if digital_artform:
+            tech_artist_details.append(digital_artform)
+
+        photographer = self._get_choice(kwargs.get("photographer", "random"), PHOTOGRAPHER)
+        if photographer:
+            tech_artist_details.append(f"photo by {photographer}")
+
+        artist = self._get_choice(kwargs.get("artist", "random"), ARTIST)
+        if artist:
+            tech_artist_details.append(f"by {artist}")
 
         components.append(smart_join(tech_artist_details))
 
@@ -361,8 +383,44 @@ class PromptGenerator:
         # Join all collected components, using smart_join to handle potential empty strings between sections
         full_prompt_string = smart_join(components, separator=" ")
 
+        # --- Debug Info: Track all category usage ---
+        all_categories = [
+            'custom', 'subject', 'default_tags', 'body_types', 'artform', 'photography_styles',
+            'digital_artform', 'artist', 'photographer', 'roles', 'hairstyles', 'hair_color',
+            'additional_details', 'lighting', 'clothing', 'composition', 'pose', 'background',
+            'place', 'age_group', 'ethnicity', 'accessories', 'expression', 'face_features',
+            'eye_colors', 'skin_tone', 'facial_hair', 'body_markings', 'makeup_styles',
+            'tattoos_scars', 'photo_type', 'device'
+        ]
+
+        for category in all_categories:
+            input_value = kwargs.get(category, "disabled")
+            debug_info['all_inputs'][category] = input_value
+
+            # Determine if category was actually used and provide specific reason if not
+            if not input_value or input_value == "":
+                debug_info['not_used'][category] = "empty (not provided)"
+            elif input_value.lower() == "disabled":
+                debug_info['not_used'][category] = "disabled (explicitly set)"
+            elif input_value.lower() == "random":
+                # Random means it was used (a value was selected)
+                debug_info['used'][category] = "random (value selected)"
+            else:
+                # Specific value was used
+                debug_info['used'][category] = input_value
+
+        # Special cases: Check for conditional logic
+        # default_tags is ignored when subject is provided
+        if kwargs.get('subject', '') and kwargs.get('subject', '').lower() not in ['random', 'disabled']:
+            if 'default_tags' in debug_info['used']:
+                debug_info['not_used']['default_tags'] = "ignored (subject takes precedence)"
+                del debug_info['used']['default_tags']
+
+        # Format debug output as readable string
+        debug_output = self._format_debug_info(debug_info)
+
         # Process using the V2 splitter
-        return self.process_string_v2(full_prompt_string, seed)
+        return self.process_string_v2(full_prompt_string, seed, debug_output)
 
 
 # --- ComfyUI Node Class (Updated RETURN_TYPES) ---
@@ -408,8 +466,8 @@ class FluxPromptGenerator:
         }
 
     # Correct RETURN_TYPES and add RETURN_NAMES
-    RETURN_TYPES = ("STRING",)
-    RETURN_NAMES = ("prompt",)
+    RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("prompt", "t5xxl", "clip_l", "clip_g", "seed_used", "debug_info")
 
     FUNCTION = "execute"
     CATEGORY = "Prompt"
@@ -419,9 +477,11 @@ class FluxPromptGenerator:
         seed = kwargs.get('seed', 0) # Extract seed separately if needed elsewhere
         prompt_generator = PromptGenerator(seed)
         prompt = prompt_generator.generate_prompt(**kwargs)
-        # Return the generated prompt as a single string
-        # Note: If you want to return multiple values, you can adjust RETURN_TYPES and RETURN_NAMES accordingly
-        return (prompt)
+        # Unpack the 6-tuple and return all outputs including debug_info
+        original_clean, seed_used, t5xxl_clean, clip_l_clean, clip_g_clean, debug_output = prompt
+        # Concatenate all sections into a single combined prompt
+        combined_prompt = ", ".join(filter(None, [t5xxl_clean, clip_l_clean, clip_g_clean]))
+        return (combined_prompt, t5xxl_clean, clip_l_clean, clip_g_clean, str(seed_used), debug_output)
 
     @classmethod
     def IS_CHANGED(cls, **kwargs):
