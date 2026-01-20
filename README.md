@@ -1,13 +1,13 @@
-# **Flux-Prompt-Generator**
+# **Natural Language Prompt Generator**
 
-**Flux Prompt Generator** is a **ComfyUI** node that provides a flexible and customizable prompt generator for generating detailed and creative prompts for image generation models.
-based on the work by [Aitrepreneur](https://huggingface.co/Aitrepreneur) found here [Flux Prompt Generator python code](https://huggingface.co/Aitrepreneur/FLUX-Prompt-Generator/blob/main/app.py) and modified to work with ComfyUI by [FairyRoot](https://github.com/fairy-root)
+**Prompt Generator** is a **ComfyUI** node that provides a flexible and customizable prompt generator for generating detailed and creative prompts for image generation models.
+based on the work by [Aitrepreneur](https://huggingface.co/Aitrepreneur) found here [FLUX Prompt Generator python code](https://huggingface.co/Aitrepreneur/FLUX-Prompt-Generator/blob/main/app.py) and modified to work with ComfyUI by [FairyRoot](https://github.com/fairy-root)
 
-![Flux Prompt Generator](https://i.imgur.com/I3nQzaa.png "Displaying workflow")
+![Prompt Generator](https://i.imgur.com/I3nQzaa.png "Displaying workflow")
 
 ## Overview
 
-The **Flux Prompt Generator** utilizes a collection of JSON data files containing various categories of descriptive terms. These categories include:
+The **Prompt Generator** utilizes a collection of JSON data files containing various categories of descriptive terms. These categories include:
 
 - **Accessories:** Glasses, Hats, Jewelry, etc.
 - **Additional Details:** Clothing, Accessories, etc.
@@ -40,7 +40,7 @@ The **Flux Prompt Generator** utilizes a collection of JSON data files containin
 - **Skin Tone:** Pale, Dark, etc.
 - **Tattoos & Scars:** Detailed descriptions of body modifications.
 
-![Flux Prompt Generator](https://i.imgur.com/0TNizfp.png "Displaying node")
+![Prompt Generator](https://i.imgur.com/0TNizfp.png "Displaying node")
 
 The node allows you to select specific terms or choose "random" to let the generator pick random terms from the corresponding JSON file. This randomness adds a degree of unpredictability and creativity to the generated prompts.
 
@@ -50,12 +50,12 @@ The node allows you to select specific terms or choose "random" to let the gener
 2. **cmd** in the address bar, then use this command:
 
 ```
-git clone https://github.com/fairy-root/Flux-Prompt-Generator.git
+git clone https://github.com/fairy-root/Prompt-Generator.git
 ```
 
 ## Usage
 
-1. **Add the "Flux Prompt Generator" node to your ComfyUI workflow.**
+1. **Add the "Prompt Generator" node to your ComfyUI workflow.**
 2. **Configure the desired parameters:**
 
    - **Seed:** Controls the randomness of the generator.
@@ -64,7 +64,7 @@ git clone https://github.com/fairy-root/Flux-Prompt-Generator.git
    - **Artform:** Choose the desired art form (Photography, Digital Art, etc.).
    - **... (All other parameters as described in the Overview section)**
 
-3. **Connect the output of the node to a text-to-image model (like Flux or Stable Diffusion...etc) to generate images based on the generated prompt.**
+3. **Connect the output of the node to a text-to-image model (like or Stable Diffusion...etc) to generate images based on the generated prompt.**
 
 ## Example
 
@@ -79,24 +79,6 @@ Let's say you want to generate a prompt for a portrait photograph of a woman wit
 
 The node would then generate a prompt similar to: "photography of a woman with long hair, dressed in a dress, in a forest."
 
-## Donation
-
-Your support is appreciated:
-
-- USDt (TRC20): `TGCVbSSJbwL5nyXqMuKY839LJ5q5ygn2uS`
-- BTC: `13GS1ixn2uQAmFQkte6qA5p1MQtMXre6MT`
-- ETH (ERC20): `0xdbc7a7dafbb333773a5866ccf7a74da15ee654cc`
-- LTC: `Ldb6SDxUMEdYQQfRhSA3zi4dCUtfUdsPou`
-
-## Author and Contact
-
-- GitHub: [FairyRoot](https://github.com/fairy-root)
-- Telegram: [@FairyRoot](https://t.me/FairyRoot)
-
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request for any improvements or features.
